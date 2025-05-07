@@ -23,8 +23,8 @@ RUN adduser --disabled-password --gecos "" appuser && \
 
 # Uvicornでアプリケーションを起動（ワーカー数を制限）
 # 環境変数からホストとポートを取得するようにエントリポイントスクリプトを使用
-COPY ./docker/scripts /workdir/scripts
-RUN chmod +x ./scripts/entrypoint.sh
+COPY ./docker /workdir/docker
+RUN chmod +x ./docker/entrypoint.sh
 
 USER appuser
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["./docker/entrypoint.sh"]

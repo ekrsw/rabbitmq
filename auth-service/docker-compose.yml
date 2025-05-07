@@ -1,0 +1,18 @@
+services:
+  auth-service:
+    container_name: auth_service
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8080:8080"
+    expose:
+      - "8080"
+    volumes:
+      - ./app:/workdir/app
+    networks:
+      - microservice-networks
+networks:
+  microservice-networks:
+    name: microservice-networks
+    driver: bridge

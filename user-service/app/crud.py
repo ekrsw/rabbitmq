@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.models import AuthUser
+from app.models import User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
@@ -13,7 +13,6 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: uuid.UUID
     username: str
-    user_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -21,16 +20,15 @@ class UserResponse(BaseModel):
         from_attributes = True  # SQLAlchemyモデルからの変換を可能にする
 
     
-async def create(db: AsyncSession, user_in: UserCreate) -> AuthUser:
-    db_user = AuthUser(
+async def create(db: AsyncSession, user_in: UserCreate) -> User:
+    db_user = User(
         username=user_in.username,
-        user_id=None
     ) 
     db.add(db_user)
     await db.flush()
     return UserResponse.model_validate(db_user)
 
-async def get_user(db: AsyncSession) -> List[AuthUser]:
-    result = await db.execute(select(AuthUser))
+async def get_user(db: AsyncSession) -> List[User]:
+    result = await db.execute(select(User))
     users = result.scalars().all()
     return [UserResponse.model_validate(user) for user in users]

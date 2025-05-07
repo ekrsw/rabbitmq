@@ -21,6 +21,7 @@ async def get_async_session() -> AsyncSession:
             yield session
         except Exception as e:
             await session.rollback()
+            raise
         finally:
             try:
                 await session.commit()

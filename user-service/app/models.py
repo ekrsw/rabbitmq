@@ -1,5 +1,6 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from typing import Optional
 import uuid
 
 from sqlalchemy import DateTime, String, Uuid
@@ -19,6 +20,6 @@ class Base(DeclarativeBase):
     )
 
 class User(Base):
-    __tablename__ = "auth_users"
+    __tablename__ = "users"
 
     username: Mapped[str] = mapped_column(String, nullable=False, index=True, unique=True)
