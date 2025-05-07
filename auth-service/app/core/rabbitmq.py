@@ -5,6 +5,9 @@ from aio_pika import connect_robust, Message, ExchangeType, DeliveryMode
 from typing import Any, Callable, Dict, Optional
 import uuid
 
+from app.core.config import settings
+from app.core.logger import get_logger
+
 logger = get_logger(__name__)
 
 # キューの定義
