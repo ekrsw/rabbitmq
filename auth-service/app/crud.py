@@ -13,7 +13,7 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: uuid.UUID
     username: str
-    user_id: Optional[str] = None
+    user_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 
