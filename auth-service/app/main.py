@@ -9,6 +9,7 @@ import asyncio
 
 from app.core.rabbitmq import rabbitmq_client, USER_CREATE_QUEUE
 from app.schemas.message import UserCreateRequest
+from app.messaging.auth_handlers import register_message_handlers
 
 from app.core.logging import get_logger
 
@@ -19,9 +20,24 @@ app = FastAPI()
 
 @app.on_event("startup")
 async def startup_db_client():
+    # データベース初期化
     db = Database()
     await db.init()
     print("Database initialized on startup")
+    
+    # RabbitMQ接続の初期化
+    try:
+        await rabbitmq_client.connect()
+        
+        # メッセージハンドラーの登録
+        await register_message_handlers()
+        
+        # メッセージ消費の開始
+        await rabbitmq_client.start_consuming()
+        
+        logger.info("RabbitMQコンシューマーを初期化しました")
+    except Exception as e:
+        logger.error(f"RabbitMQ初期化中にエラーが発生しました: {str(e)}")
 
 @app.post("/create_user")
 async def create_user(
@@ -67,6 +83,15 @@ async def get_users(
             detail="No users found"
         )
     return users
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    # RabbitMQ接続のクローズ
+    try:
+        await rabbitmq_client.close()
+        logger.info("RabbitMQコネクションを正常に終了しました")
+    except Exception as e:
+        logger.error(f"RabbitMQ終了中にエラーが発生しました: {str(e)}")
 
 async def main() -> None:
     db = Database()

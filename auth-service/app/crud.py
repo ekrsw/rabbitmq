@@ -34,3 +34,14 @@ async def get_user(db: AsyncSession) -> List[AuthUser]:
     result = await db.execute(select(AuthUser))
     users = result.scalars().all()
     return [UserResponse.model_validate(user) for user in users]
+
+async def update_user_id(db: AsyncSession, username: str, user_id: uuid.UUID) -> Optional[AuthUser]:
+    """ユーザー名に基づいてAuthUserのuser_idを更新する"""
+    result = await db.execute(select(AuthUser).where(AuthUser.username == username))
+    auth_user = result.scalars().first()
+    
+    if auth_user:
+        auth_user.user_id = user_id
+        await db.flush()
+        return UserResponse.model_validate(auth_user)
+    return None
