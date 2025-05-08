@@ -6,7 +6,7 @@ import uuid
 
 from app.core.logging import get_logger
 from app.core.rabbitmq import rabbitmq_client, USER_CREATE_QUEUE, USER_CREATED_QUEUE
-from app.crud import create as user_create, UserCreate
+from app.crud import create as user_create, UserCreate, check_message_processed, save_processed_message
 from app.session import get_async_session
 from app.schemas.message import UserCreateRequest, UserCreatedResponse, UserCreationStatus
 
@@ -39,25 +39,67 @@ async def handle_user_create_message(message: IncomingMessage) -> None:
             # データベースセッションを取得
             async for session in get_async_session():
                 try:
-                    # UserCreateオブジェクトを作成
-                    user_create_obj = UserCreate(
-                        username=request.username
+                    # 冪等性チェック - 同じメッセージが既に処理済みかどうかを確認
+                    processed_message = await check_message_processed(
+                        session, 
+                        request.message_id, 
+                        USER_CREATE_QUEUE
                     )
                     
-                    # ユーザーを作成
-                    created_user = await user_create(session, user_create_obj)
+                    if processed_message:
+                        # 既に処理済みの場合は、保存されている結果を返す
+                        logger.info(f"メッセージは既に処理済みです: message_id={request.message_id}")
+                        
+                        # 保存されている結果データがあれば復元
+                        if processed_message.result_data:
+                            try:
+                                result_data = json.loads(processed_message.result_data)
+                                if result_data.get("user_id"):
+                                    response.user_id = uuid.UUID(result_data["user_id"])
+                                if result_data.get("status"):
+                                    response.status = result_data["status"]
+                            except Exception as e:
+                                logger.error(f"保存された結果データの解析に失敗: {str(e)}")
+                        
+                        # 既に成功していた場合は成功ステータスを設定
+                        if processed_message.status == "success":
+                            response.status = UserCreationStatus.SUCCESS
+                    else:
+                        # 新規メッセージの場合は処理を実行
+                        # UserCreateオブジェクトを作成
+                        user_create_obj = UserCreate(
+                            username=request.username
+                        )
+                        
+                        # ユーザーを作成
+                        created_user = await user_create(session, user_create_obj)
+                        
+                        # 作成されたユーザーのIDを取得
+                        user_id = created_user.id if hasattr(created_user, 'id') else None
+                        
+                        # 成功レスポンスを設定
+                        response.status = UserCreationStatus.SUCCESS
+                        response.user_id = user_id
+                        response.processing_time_ms = (time.time() - start_time) * 1000
+                        
+                        # 処理済みメッセージとして記録
+                        result_data = {
+                            "user_id": str(user_id) if user_id else None,
+                            "status": response.status
+                        }
+                        await save_processed_message(
+                            session, 
+                            request.message_id, 
+                            USER_CREATE_QUEUE, 
+                            "success",
+                            result_data
+                        )
+                        
+                        logger.info(f"ユーザーを作成しました: username={request.username}, user_id={user_id}")
+                    
+                    # トランザクションをコミット
                     await session.commit()
-                    
-                    # 作成されたユーザーのIDを取得
-                    user_id = created_user.id if hasattr(created_user, 'id') else None
-                    
-                    # 成功レスポンスを設定
-                    response.status = UserCreationStatus.SUCCESS
-                    response.user_id = user_id
-                    response.processing_time_ms = (time.time() - start_time) * 1000
-                    
-                    logger.info(f"ユーザーを作成しました: username={request.username}, user_id={user_id}")
-                    
+                        
                 except Exception as e:
                     await session.rollback()
                     
@@ -75,6 +117,24 @@ async def handle_user_create_message(message: IncomingMessage) -> None:
                     
                     response.error_message = str(e)
                     logger.error(f"ユーザー作成中にエラーが発生: {str(e)}")
+                    
+                    # エラー情報を処理済みメッセージとして記録
+                    try:
+                        result_data = {
+                            "error": str(e),
+                            "status": response.status
+                        }
+                        await save_processed_message(
+                            session, 
+                            request.message_id, 
+                            USER_CREATE_QUEUE, 
+                            "error",
+                            result_data
+                        )
+                        await session.commit()
+                    except Exception as inner_e:
+                        await session.rollback()
+                        logger.error(f"エラー情報の保存に失敗: {str(inner_e)}")
             
             # 結果をauth-serviceに送信
             await rabbitmq_client.publish_message(

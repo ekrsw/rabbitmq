@@ -6,7 +6,7 @@ import uuid
 
 from app.core.logging import get_logger
 from app.core.rabbitmq import rabbitmq_client, USER_CREATED_QUEUE
-from app.crud import update_user_id
+from app.crud import update_user_id, check_message_processed, save_processed_message
 from app.session import get_async_session
 from app.schemas.message import UserCreatedResponse, UserCreationStatus
 
@@ -34,23 +34,90 @@ async def handle_user_created_message(message: IncomingMessage) -> None:
                 # データベースセッションを取得
                 async for session in get_async_session():
                     try:
-                        # user_idを更新
-                        updated_user = await update_user_id(session, response.username, response.user_id)
-                        await session.commit()
+                        # 冪等性チェック - 同じメッセージが既に処理済みかどうかを確認
+                        processed_message = await check_message_processed(
+                            session, 
+                            response.message_id, 
+                            USER_CREATED_QUEUE
+                        )
                         
-                        if updated_user:
-                            logger.info(f"AuthUserのuser_idを更新しました: username={response.username}, user_id={response.user_id}")
+                        if processed_message:
+                            # 既に処理済みの場合はスキップ
+                            logger.info(f"メッセージは既に処理済みです: message_id={response.message_id}")
                         else:
-                            logger.error(f"AuthUserの更新に失敗: ユーザーが見つかりません: username={response.username}")
+                            # user_idを更新
+                            updated_user = await update_user_id(session, response.username, response.user_id)
+                            
+                            # 処理結果を記録
+                            result_data = {
+                                "username": response.username,
+                                "user_id": str(response.user_id),
+                                "updated": updated_user is not None
+                            }
+                            
+                            status = "success" if updated_user else "error"
+                            await save_processed_message(
+                                session, 
+                                response.message_id, 
+                                USER_CREATED_QUEUE, 
+                                status,
+                                result_data
+                            )
+                            
+                            if updated_user:
+                                logger.info(f"AuthUserのuser_idを更新しました: username={response.username}, user_id={response.user_id}")
+                            else:
+                                logger.error(f"AuthUserの更新に失敗: ユーザーが見つかりません: username={response.username}")
+                        
+                        # トランザクションをコミット
+                        await session.commit()
                             
                     except Exception as e:
                         await session.rollback()
                         logger.error(f"AuthUserの更新中にエラーが発生: {str(e)}")
+                        
+                        # エラー情報を処理済みメッセージとして記録
+                        try:
+                            result_data = {
+                                "username": response.username,
+                                "error": str(e)
+                            }
+                            await save_processed_message(
+                                session, 
+                                response.message_id, 
+                                USER_CREATED_QUEUE, 
+                                "error",
+                                result_data
+                            )
+                            await session.commit()
+                        except Exception as inner_e:
+                            await session.rollback()
+                            logger.error(f"エラー情報の保存に失敗: {str(inner_e)}")
             else:
                 if response.status != UserCreationStatus.SUCCESS:
                     logger.warning(f"ユーザー作成が成功していません: status={response.status}, username={response.username}")
                 elif not response.user_id:
                     logger.warning(f"user_idが提供されていません: username={response.username}")
+                
+                # 処理結果を記録（エラーケース）
+                async for session in get_async_session():
+                    try:
+                        result_data = {
+                            "username": response.username,
+                            "status": response.status,
+                            "error_message": response.error_message
+                        }
+                        await save_processed_message(
+                            session, 
+                            response.message_id, 
+                            USER_CREATED_QUEUE, 
+                            "error",
+                            result_data
+                        )
+                        await session.commit()
+                    except Exception as e:
+                        await session.rollback()
+                        logger.error(f"エラー情報の保存に失敗: {str(e)}")
                 
         except json.JSONDecodeError as e:
             logger.error(f"メッセージのJSONデコードに失敗: {str(e)}")
