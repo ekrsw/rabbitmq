@@ -11,8 +11,8 @@ services:
     volumes:
       - ./app:/workdir/app
     networks:
-      - microservice-networks
+      - microservice-network
 networks:
-  microservice-networks:
-    name: microservice-networks
+  microservice-network:
+    name: microservice-network
     driver: bridge

@@ -7,6 +7,13 @@ from app.session import get_async_session
 from app.crud import UserCreate, create, get_user
 import asyncio
 
+from app.core.rabbitmq import rabbitmq_client, USER_CREATE_QUEUE
+from app.schemas.message import UserCreateRequest
+
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 app = FastAPI()
 
@@ -22,6 +29,23 @@ async def create_user(
     user_in: UserCreate,
     async_session: AsyncSession = Depends(get_async_session)
 ) -> Any:
+    # 2. user-serviceにユーザー作成リクエストを送信
+    user_create_request = UserCreateRequest(
+        username=user_in.username,
+    )
+    
+    # メッセージをパブリッシュ
+    success = await rabbitmq_client.publish_message(
+        USER_CREATE_QUEUE,
+        user_create_request.model_dump()
+    )
+    
+    if success:
+        logger.info(f"user-serviceにユーザー作成リクエストを送信しました: {user_create_request.message_id}")
+    else:
+        logger.error(f"user-serviceへのメッセージ送信に失敗しました: {user_in.username}")
+        # メッセージ送信に失敗した場合でもユーザー作成は成功しているので、エラーにはしない
+        
     user = await create(async_session, user_in)
     if not user:
         raise HTTPException(
@@ -29,6 +53,7 @@ async def create_user(
             detail="User creation failed"
         )
     return user
+
 
 @app.get("/get_users")
 async def get_users(
