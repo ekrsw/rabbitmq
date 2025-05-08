@@ -1,4 +1,4 @@
 fastapi[uvicorn]
 sqlalchemy
 aiosqlite
-aio-pika
+aio-pika==9.5.5 # RabbitMQ用の非同期クライアント
